@@ -1,10 +1,11 @@
+# <pep8 compliant>
+
 import bpy
 import os
 import random
 from mathutils import Vector
 from . import xps_material
 from . import xps_const
-
 
 ALPHA_MODE_CHANNEL = 'CHANNEL_PACKED'
 # Nodes Layout
@@ -62,8 +63,8 @@ NODE_SOCKET_SHADER = 'NodeSocketShader'
 NODE_SOCKET_VECTOR = 'NodeSocketVector'
 
 # Colors
-DIFFUSE_COLOR = (0.9, 0.9, 0.9, 1)
-SPECULAR_COLOR = (0.707, 0.707, 0.707, 1)
+DIFFUSE_COLOR = (1, 1, 1, 1)
+SPECULAR_COLOR = (0, 0, 0, 1)
 LIGHTMAP_COLOR = (1, 1, 1, 1)
 NORMAL_COLOR = (0.5, 0.5, 1, 1)
 GREY_COLOR = (0.5, 0.5, 0.5, 1)
@@ -128,7 +129,7 @@ def loadImage(textureFilepath):
     textureFilename = os.path.basename(textureFilepath)
     fileRoot, fileExt = os.path.splitext(textureFilename)
 
-    if (os.path.isfile(textureFilepath)):
+    if (os.path.exists(textureFilepath)):
         print("Loading Texture: " + textureFilename)
         image = bpy.data.images.load(filepath=textureFilepath, check_existing=True)
     else:
@@ -185,7 +186,8 @@ def makeNodesMaterial(xpsSettings, materialData, rootDir, mesh_da, meshInfo, fla
     coordNode.location = xpsShadeNode.location + Vector((-2500, 400))
 
     if useAlpha:
-        materialData.blend_method = 'BLEND'
+        materialData.blend_method = 'HASHED'
+        materialData.shadow_method = 'HASHED'
 
     node_tree.links.new(xpsShadeNode.outputs['Shader'], ouputNode.inputs['Surface'])
 
@@ -256,7 +258,7 @@ def makeNodesMaterial(xpsSettings, materialData, rootDir, mesh_da, meshInfo, fla
             mappingCoordNode.location = imageNode.location + Vector((-400, 0))
             node_tree.links.new(coordNode.outputs['Reflection'], mappingCoordNode.inputs['Vector'])
             node_tree.links.new(mappingCoordNode.outputs['Vector'], environmentNode.inputs['Vector'])
-            node_tree.links.new(imageNode.outputs['Color'], xpsShadeNode.inputs['Environment'])
+            node_tree.links.new(imageNode.outputs['Color'], xpsShadeNode.inputs['Emission'])
         elif (texType == xps_material.TextureType.MASK):
             imageNode.label = 'Bump Mask'
             imageNode.image.colorspace_settings.is_data = True
@@ -293,7 +295,7 @@ def makeNodesMaterial(xpsSettings, materialData, rootDir, mesh_da, meshInfo, fla
             mappingCoordNode.location = imageNode.location + Vector((-400, 0))
             if renderGroup.renderGroupNum in (36, 37):
                 setNodeScale(mappingCoordNode, param1)
-            node_tree.links.new(imageNode.outputs['Color'], xpsShadeNode.inputs['Emission'])
+            node_tree.links.new(imageNode.outputs['Color'], xpsShadeNode.inputs['Environment'])
         elif (texType == xps_material.TextureType.EMISSION_MINI):
             imageNode.label = 'Mini Emission'
             imageNode.location = xpsShadeNode.location + Vector((imagesPosX, imagesPosY * -6))
@@ -421,7 +423,7 @@ def invert_channel_group():
     invert_r.min_value = 0
     invert_r.max_value = 1
     invert_g = node_tree.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'G')
-    invert_g.default_value = 0
+    invert_g.default_value = 1
     invert_g.min_value = 0
     invert_g.max_value = 1
     invert_b = node_tree.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'B')
@@ -539,11 +541,19 @@ def xps_shader_group():
 
     output_diffuse = shader.inputs.new(NODE_SOCKET_COLOR, 'Diffuse')
     output_diffuse.default_value = (DIFFUSE_COLOR)
+    output_alpha = shader.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'Metallic')
+    output_alpha.min_value = 0
+    output_alpha.max_value = 1
+    output_alpha.default_value = 0
     output_lightmap = shader.inputs.new(NODE_SOCKET_COLOR, 'Lightmap')
     output_lightmap.default_value = (LIGHTMAP_COLOR)
     output_specular = shader.inputs.new(NODE_SOCKET_COLOR, 'Specular')
     output_specular.default_value = (SPECULAR_COLOR)
     output_emission = shader.inputs.new(NODE_SOCKET_COLOR, 'Emission')
+    output_alpha = shader.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'Emission Strength')
+    output_alpha.min_value = 0
+    output_alpha.max_value = 1
+    output_alpha.default_value = .1
     output_normal = shader.inputs.new(NODE_SOCKET_COLOR, 'Bump Map')
     output_normal.default_value = (NORMAL_COLOR)
     output_bump_mask = shader.inputs.new(NODE_SOCKET_COLOR, 'Bump Mask')
@@ -552,6 +562,10 @@ def xps_shader_group():
     output_microbump2 = shader.inputs.new(NODE_SOCKET_COLOR, 'MicroBump 2')
     output_microbump2.default_value = (NORMAL_COLOR)
     output_environment = shader.inputs.new(NODE_SOCKET_COLOR, 'Environment')
+    output_alpha = shader.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'Strength')
+    output_alpha.min_value = 0
+    output_alpha.max_value = 1
+    output_alpha.default_value = .1
     output_alpha = shader.inputs.new(NODE_SOCKET_FLOAT_FACTOR, 'Alpha')
     output_alpha.min_value = 0
     output_alpha.max_value = 1
@@ -572,24 +586,20 @@ def xps_shader_group():
     shader.links.new(group_input.outputs['Lightmap'], mix_rgb.inputs[2])
     shader.links.new(mix_rgb.outputs['Color'], principled.inputs['Base Color'])
 
+    # Metallic
+    shader.links.new(group_input.outputs['Metallic'], principled.inputs['Metallic'])
+
     # Specular
-    bw = shader.nodes.new(RGB_TO_BW_NODE)
-    bw.location += Vector((-800, -100))
-    pow = shader.nodes.new(SHADER_NODE_MATH)
-    pow.location += Vector((-600, -100))
-    pow.inputs[1].default_value = 2
-    pow.operation = 'POWER'
     inv = shader.nodes.new(INVERT_NODE)
     inv.location += Vector((-400, -100))
 
-    shader.links.new(group_input.outputs['Specular'], bw.inputs['Color'])
-    shader.links.new(bw.outputs['Val'], pow.inputs[0])
-    shader.links.new(pow.outputs['Value'], inv.inputs['Color'])
+    shader.links.new(group_input.outputs['Specular'], inv.inputs['Color'])
     shader.links.new(inv.outputs['Color'], principled.inputs['Roughness'])
 
     # Alpha & Emission
     shader.links.new(group_input.outputs['Alpha'], principled.inputs['Alpha'])
     shader.links.new(group_input.outputs['Emission'], principled.inputs['Emission'])
+    shader.links.new(group_input.outputs['Emission Strength'], principled.inputs['Emission Strength'])
 
     # Normals
     normal_invert_channel = getNodeGroup(shader, INVERT_CHANNEL_NODE)
@@ -637,9 +647,13 @@ def xps_shader_group():
     shader_add = shader.nodes.new(SHADER_ADD_NODE)
     shader_add.location += Vector((300, 100))
 
+    shader.links.new(group_input.outputs['Strength'], emission_shader.inputs['Strength'])
+
     shader.links.new(group_input.outputs['Environment'], emission_shader.inputs['Color'])
     shader.links.new(emission_shader.outputs['Emission'], shader_add.inputs[0])
     shader.links.new(principled.outputs['BSDF'], shader_add.inputs[1])
     shader.links.new(shader_add.outputs['Shader'], group_output.inputs[0])
 
     return shader
+
+

@@ -56,3 +56,6 @@ webspynner/__pychache__/
 # Linux file backups
 *~
 
+# Project specific
+/.idea
+/*_updater
